@@ -32,7 +32,15 @@ PR URL + PAT
     │                 second LLM pass that must CONFIRM or REJECT it.
     │                 Unverifiable findings fail closed (rejected).
     ▼
-5. Report ─────────── markdown to stdout, optional JSON (--json), optional
+5. Audit ──────────── the assembled review (summary + confirmed findings) is
+    │                 checked as a whole for hallucination — claims not
+    │                 supported by the diffs shown. If flagged, the entire
+    │                 review (steps 2-4) is regenerated with the audit's
+    │                 rejection reason fed back in, up to --max-attempts
+    │                 times. A review still flagged after that is never
+    │                 posted (--post is refused; the exit code is 4).
+    ▼
+6. Report ─────────── markdown to stdout, optional JSON (--json), optional
                       posting to the PR as a review with line comments (--post)
 ```
 
@@ -53,6 +61,14 @@ otherwise is selling something. What this bot *does* guarantee by construction:
 - **Zero unvetted claims**: every finding must survive an independent
   verification pass; if verification errors out, the finding is dropped
   (fail closed), so errors can't leak speculative findings into the report.
+- **Nothing is posted while flagged as hallucinated**: after grounding and
+  verification, the whole review (summary + surviving findings) goes through
+  one more holistic audit pass. If it's flagged, the bot regenerates the
+  entire review and audits it again, up to `--max-attempts` times. A review
+  that is still flagged after that is shown on stdout with a warning banner
+  but `--post` is refused (exit code `4`) — this fails closed too, so an
+  audit that errors out counts as hallucinated rather than being silently
+  skipped.
 - **Schema-valid output, always**: generation is constrained to a JSON schema,
   so there is no free-text parsing that can silently go wrong.
 
@@ -102,7 +118,9 @@ pr-review-bot https://github.com/owner/repo/pull/123 --show-discarded
 ```
 
 Exit codes: `0` clean review, `3` confirmed findings exist (useful for CI
-gating), `1` runtime error, `2` bad invocation.
+gating), `4` review still failed its hallucination audit after all attempts
+and `--post` was requested (nothing was posted), `1` runtime error, `2` bad
+invocation.
 
 ## Options
 
@@ -112,7 +130,8 @@ gating), `1` runtime error, `2` bad invocation.
 | `--model` | `qwen2.5-coder:7b` | Ollama model name |
 | `--ollama-url` | `http://localhost:11434` | Ollama server |
 | `--num-ctx` | `16384` | context window given to the model |
-| `--post` | off | post review + line comments to the PR |
+| `--max-attempts` | `2` | regenerate the review this many times if the hallucination audit rejects it |
+| `--post` | off | post review + line comments to the PR (refused if the review fails its hallucination audit) |
 | `--json FILE` | off | write structured JSON result (`-` = stdout) |
 | `--show-discarded` | off | include filtered candidates in the report |
 | `-v` | off | progress logs on stderr |

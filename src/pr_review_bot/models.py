@@ -91,3 +91,10 @@ class ReviewResult:
     discarded: list[tuple[Finding, str]]  # finding, reason it was dropped
     files_reviewed: list[str]
     model: str
+    # Holistic hallucination audit (see Reviewer._audit_review): whether the
+    # final summary + findings, taken together, were flagged as containing
+    # claims not supported by the diff. A hallucinated result must never be
+    # posted to the PR.
+    hallucinated: bool = False
+    audit_reason: str = ""
+    attempts: int = 1
