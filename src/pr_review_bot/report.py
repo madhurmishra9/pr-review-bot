@@ -25,6 +25,16 @@ def to_markdown(result: ReviewResult, include_discarded: bool = False) -> str:
         "Every finding below is anchored to an added line in the diff and "
         "survived an independent verification pass.*",
         "",
+    ]
+    if result.hallucinated:
+        lines += [
+            "> ⚠️ **This review failed its hallucination audit and was NOT "
+            f"posted.** Reason: {result.audit_reason or '(no reason given)'} "
+            f"(after {result.attempts} attempt(s)). Treat everything below as "
+            "unverified.",
+            "",
+        ]
+    lines += [
         "### Summary",
         result.summary or "(none)",
         "",
@@ -77,8 +87,22 @@ def to_json(result: ReviewResult) -> str:
     return json.dumps(payload, indent=2)
 
 
+class HallucinatedReviewError(RuntimeError):
+    """Raised when asked to post a review that failed its hallucination audit."""
+
+
 def post_to_github(gh: GitHubClient, result: ReviewResult) -> str:
-    """Post the review to the PR; returns the review URL."""
+    """Post the review to the PR; returns the review URL.
+
+    Refuses to post a review that is still flagged as hallucinated after
+    all regeneration attempts — this is the hard backstop, independent of
+    whatever the caller decided to do with that flag.
+    """
+    if result.hallucinated:
+        raise HallucinatedReviewError(
+            "refusing to post: review failed its hallucination audit after "
+            f"{result.attempts} attempt(s): {result.audit_reason or '(no reason given)'}"
+        )
     comments = [
         {
             "path": f.file,

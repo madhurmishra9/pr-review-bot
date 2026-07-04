@@ -55,8 +55,18 @@ class OllamaClient:
                 f"Model {self.model!r} is not pulled. Run: ollama pull {self.model}"
             )
 
-    def chat_json(self, system: str, user: str, schema: dict) -> dict:
-        """Single deterministic chat call returning schema-valid JSON."""
+    def chat_json(self, system: str, user: str, schema: dict,
+                  seed: int | None = None) -> dict:
+        """Single deterministic chat call returning schema-valid JSON.
+
+        ``seed`` defaults to the fixed seed that makes every call
+        reproducible. Callers that must regenerate a rejected answer (e.g. a
+        review flagged as hallucinated) can pass a different seed so the
+        retry is not just a byte-for-byte repeat of the same greedy decode.
+        """
+        options = {**DETERMINISTIC_OPTIONS, "num_ctx": self.num_ctx}
+        if seed is not None:
+            options["seed"] = seed
         payload = {
             "model": self.model,
             "messages": [
@@ -65,7 +75,7 @@ class OllamaClient:
             ],
             "stream": False,
             "format": schema,
-            "options": {**DETERMINISTIC_OPTIONS, "num_ctx": self.num_ctx},
+            "options": options,
         }
         try:
             resp = requests.post(
@@ -131,4 +141,14 @@ SUMMARY_SCHEMA = {
     "type": "object",
     "properties": {"summary": {"type": "string"}},
     "required": ["summary"],
+}
+
+# JSON schema for the holistic post-review hallucination audit.
+AUDIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "hallucinated": {"type": "boolean"},
+        "reason": {"type": "string"},
+    },
+    "required": ["hallucinated", "reason"],
 }

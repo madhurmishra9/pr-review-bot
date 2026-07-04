@@ -12,8 +12,8 @@ import sys
 
 from .github_client import GitHubClient, GitHubError, parse_pr_url
 from .llm import DEFAULT_MODEL, DEFAULT_URL, LLMError, OllamaClient
-from .report import post_to_github, to_json, to_markdown
-from .reviewer import Reviewer
+from .report import HallucinatedReviewError, post_to_github, to_json, to_markdown
+from .reviewer import DEFAULT_MAX_ATTEMPTS, Reviewer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,8 +32,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"Ollama server URL (default: {DEFAULT_URL})")
     p.add_argument("--num-ctx", type=int, default=16384,
                    help="Model context window in tokens (default: 16384)")
+    p.add_argument("--max-attempts", type=int, default=DEFAULT_MAX_ATTEMPTS,
+                   help="Regenerate the review up to this many times if a "
+                        f"holistic hallucination audit rejects it (default: "
+                        f"{DEFAULT_MAX_ATTEMPTS})")
     p.add_argument("--post", action="store_true",
-                   help="Post the review to the PR (default: print to stdout only)")
+                   help="Post the review to the PR (default: print to stdout only). "
+                        "Refused if the review fails its hallucination audit.")
     p.add_argument("--json", dest="json_out", metavar="FILE",
                    help="Also write the structured result as JSON to FILE ('-' for stdout)")
     p.add_argument("--show-discarded", action="store_true",
@@ -73,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     gh = GitHubClient(token)
     try:
-        result = Reviewer(gh, llm).review(pr)
+        result = Reviewer(gh, llm).review(pr, max_attempts=args.max_attempts)
     except (GitHubError, LLMError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -88,11 +93,19 @@ def main(argv: list[str] | None = None) -> int:
             with open(args.json_out, "w", encoding="utf-8") as fh:
                 fh.write(payload + "\n")
 
-    if args.post:
+    if result.hallucinated:
+        print(
+            f"\nerror: review failed its hallucination audit after "
+            f"{result.attempts} attempt(s), not posting: {result.audit_reason}",
+            file=sys.stderr,
+        )
+        if args.post:
+            return 4
+    elif args.post:
         try:
             url = post_to_github(gh, result)
             print(f"\nPosted review: {url}", file=sys.stderr)
-        except GitHubError as exc:
+        except (GitHubError, HallucinatedReviewError) as exc:
             print(f"error posting review: {exc}", file=sys.stderr)
             return 1
 
